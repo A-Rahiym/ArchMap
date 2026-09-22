@@ -12,13 +12,16 @@ import { agent } from './agents/agent';
 import { startScheduleTool, stopScheduleTool } from './tools/scheduleTools';
 import { cloneRepo , cleanUpRepo , listRepos } from './tools/repo';
 import { scanProject, findFiles, readFile } from './tools/project';
+import { analyzeStyles } from './tools/styling/analyzeStyles';
+import { analyzeResponsive } from './tools/styling/analyzeResponsive';
+import { analyzeDesignTokens } from './tools/styling/analyzeDesignTokens';
 
 export const mastra = new Mastra({
   bundler: {
     externals: ['@duckdb/node-bindings'],
   },
   agents: { agent },
-  tools: { startScheduleTool, stopScheduleTool, cloneRepo, cleanUpRepo, listRepos, scanProject, findFiles, readFile },
+  tools: { startScheduleTool, stopScheduleTool, cloneRepo, cleanUpRepo, listRepos, scanProject, findFiles, readFile, analyzeStyles, analyzeResponsive, analyzeDesignTokens },
   storage: new MastraCompositeStore({
     id: 'composite-storage',
     default: new LibSQLStore({
