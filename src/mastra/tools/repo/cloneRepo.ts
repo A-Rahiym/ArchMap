@@ -2,12 +2,11 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { access } from "node:fs/promises";
+import { access, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { ARC_MAP_WORKSPACE } from "../../lib/constants";
 
 const execFileAsync = promisify(execFile);
-
-const ARC_MAP_WORKSPACE = path.join(process.cwd(),".workspace");
 
 export const cloneRepo = createTool({
   id: "clone-repo",
@@ -16,7 +15,7 @@ export const cloneRepo = createTool({
     "Clones a public GitHub repository into ArcMap's temporary workspace and returns its local path.",
 
   inputSchema: z.object({
-    repoUrl: z.string().url(),
+    repoUrl: z.url(),
   }),
 
   outputSchema: z.object({
@@ -32,28 +31,27 @@ export const cloneRepo = createTool({
       throw new Error("Only GitHub repositories are supported.");
     }
 
-    const repoName = url.pathname
-      .split("/")
-      .filter(Boolean)
-      .pop()
-      ?.replace(/\.git$/, "");
+    const rawName = url.pathname.split("/").filter(Boolean).pop() ?? "";
+    const repoName = rawName.replace(/\.git$/, "").trim();
 
     if (!repoName) {
       throw new Error("Could not determine repository name.");
     }
 
     // Where this repository will live
-    const repoPath = path.join(
-      ARC_MAP_WORKSPACE,
-      repoName
-    );
+    const repoPath = path.join(ARC_MAP_WORKSPACE, repoName);
+
+    // Ensure workspace exists
+    await mkdir(ARC_MAP_WORKSPACE, { recursive: true });
 
     // Check if the repository already exists
     try {
-      await access(repoPath);
-      throw new Error(
-        `Repository "${repoName}" is already cloned at ${repoPath}`
-      );
+      const s = await stat(repoPath);
+      if (s.isDirectory()) {
+        throw new Error(
+          `Repository "${repoName}" is already cloned at ${repoPath}`
+        );
+      }
     } catch (error) {
       // Ignore "does not exist" errors.
       // Re-throw our own "already cloned" error.
@@ -63,16 +61,42 @@ export const cloneRepo = createTool({
       ) {
         throw error;
       }
+      // ENOENT means not exists — continue; other errors should surface via access fallback
+      if (error instanceof Error && "code" in error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code && code !== "ENOENT") {
+          // For non-ENOENT filesystem errors, still check via access to be safe
+          try {
+            await access(repoPath);
+            throw new Error(
+              `Repository "${repoName}" is already cloned at ${repoPath}`
+            );
+          } catch {}
+        }
+      }
     }
 
     // Clone the repository
-    await execFileAsync("git", [
-      "clone",
-      "--depth",
-      "1",
-      repoUrl,
-      repoPath,
-    ]);
+    try {
+      await execFileAsync("git", [
+        "clone",
+        "--depth",
+        "1",
+        repoUrl,
+        repoPath,
+      ]);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : String(err);
+      // Include stderr if available
+      const stderr =
+        err && typeof err === "object" && "stderr" in err
+          ? String((err as { stderr: unknown }).stderr)
+          : "";
+      throw new Error(
+        `git clone failed for ${repoUrl}: ${msg}${stderr ? ` — ${stderr}` : ""}`
+      );
+    }
 
     return {
       repoUrl,
