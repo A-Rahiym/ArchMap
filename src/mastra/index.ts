@@ -9,14 +9,17 @@ import {
   SensitiveDataFilter,
 } from '@mastra/observability';
 import { agent } from './agents/agent';
-import { startScheduleTool, stopScheduleTool } from './tools/schedule-tools';
+import { startScheduleTool, stopScheduleTool } from './tools/scheduleTools';
+import { cloneRepo } from './tools/repo/cloneRepo';
+import { cleanUpRepo } from './tools/repo/cleanUp';
+import { listRepos } from './tools/repo/listRepos';
 
 export const mastra = new Mastra({
   bundler: {
     externals: ['@duckdb/node-bindings'],
   },
   agents: { agent },
-  tools: { startScheduleTool, stopScheduleTool },
+  tools: { startScheduleTool, stopScheduleTool, cloneRepo, cleanUpRepo, listRepos },
   storage: new MastraCompositeStore({
     id: 'composite-storage',
     default: new LibSQLStore({

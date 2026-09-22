@@ -14,3 +14,4 @@ src/mastra/public/
 *.duckdb.wal
 test/
 .workspace/
+guide/
