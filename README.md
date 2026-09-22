@@ -1,58 +1,47 @@
-# archmap
+# ArchMap
 
-Welcome to your new [Mastra](https://mastra.ai) project! We're excited to see what you build.
+Design-System & Architecture Drift Detector for frontend repositories.
 
-This starter provides you with a general-purpose Mastra agent that can research current information, manage multi-step tasks, work with local files, run approved shell commands, and create recurring schedules.
+> ArchMap watches a React/Next.js TypeScript codebase and tells you where it's drifted from its own established patterns — styling that slipped past the design system and architectural shortcuts that break the intended data flow — with evidence tied to specific files and commits.
 
-## Features
+ArchMap establishes what "normal" looks like in a codebase — architecturally and stylistically — then flags where reality has drifted from it, with evidence.
 
-- A project-level `workspace/` for files and command execution
-- Approval gates for file changes, deletions, and shell commands
-- Conversation memory, generated thread titles, and task tracking
-- Built-in web search and direct web page fetching
-- Recurring schedules that persist across restarts
-- Local libSQL storage and DuckDB observability, with optional Turso storage
-- A bundled Mastra skill that helps coding agents use current Mastra APIs
+## What it does
+
+- **Styling drift** — compares actual values in use (spacing, color, typography, radius, shadows, breakpoints) against declared tokens (`tailwind.config`, `tokens.json`, theme) or an inferred baseline of dominant values.
+- **Architecture drift** — flags layer bypasses and import shortcuts and scores blast radius (how many pages/components depend on the affected file).
+- **Evidence** — every deviation is tied to file/line and the commit that introduced it.
+
+See `guide/guide,md` for the full spec.
+
+## Tool groups
+
+| Group | Tools | Purpose |
+|---|---|---|
+| `repo/` | `clone-repo`, `cleanup-repo`, `list-repos` | Clone into `.workspace` and manage lifecycle |
+| `project/` | `scan-project`, `read-file`, `find-files` | File classification and targeted reads |
+| `styling/` | `analyze-styles`, `analyze-responsive`, `analyze-design-tokens`, `compare-baseline` | Extract values in use and run the deviation engine |
+| `architecture/` | `analyze-imports`, `analyze-components`, `analyze-routes`, `analyze-data-flow` | Supporting evidence — blast radius and coupling |
+| `dependencies/` | `analyze-dependencies` | Internal vs external deps, drift signals |
+| `history/` | `git-history` | Map each deviation to the commit that introduced it |
+
+Current progress: `repo/` complete, remaining groups in progress.
 
 ## Get started
 
-Set your `GOOGLE_GENERATIVE_AI_API_KEY` in `.env` or in your environment, then run:
+Set your `GOOGLE_GENERATIVE_AI_API_KEY` in `.env` (see `.env.example`), then:
 
 ```shell
+pnpm install
 pnpm run dev
 ```
 
-Open [http://localhost:4111](http://localhost:4111) in your browser to access [Mastra Studio](https://mastra.ai/docs/studio/overview).
+Open http://localhost:4111 for Mastra Studio.
 
-Select **Agent** in Mastra Studio and try one of these prompts:
+Verify the repo tools:
 
-- `Get the weather forecast for Austin this weekend.`
-- `Create a landing page for a Japanese sakura festival.`
-- `Check the SPCX stock price now, then check it every minute.`
-
-The agent asks for approval before it changes files or runs commands. When it creates a schedule, it returns an ID that you can use to pause the schedule.
-
-## Workspace safety
-
-The local filesystem tools stay inside the project-level `workspace/` directory. Shell commands start in that directory, but `LocalSandbox` does not provide operating-system isolation by default. Review command approvals carefully, and do not expose this template through an unauthenticated public server.
-
-## Storage
-
-The default `file:./mastra.db` database stores agent memory, tasks, and schedules locally. To use Turso, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in `.env`.
-
-Recurring schedules continue to use model tokens until you pause them. Ask the agent to pause a schedule with the ID returned by `start_schedule`.
-
-## Making it yours
-
-- Edit `src/mastra/agents/agent.ts` to change the model, instructions, memory, workspace, or approval policy.
-- Edit `src/mastra/tools/` to customize scheduling.
-- Edit `src/mastra/index.ts` to change storage and observability.
-- Add files or reusable skills under `workspace/` for the agent to use.
-
-## Learn more
-
-To learn more about Mastra, visit our [documentation](https://mastra.ai/docs/). If you're new to AI agents, check out our [course](https://mastra.ai/learn) and [YouTube videos](https://youtube.com/@mastra-ai). You can also join our [Discord](https://discord.gg/mastra-ai) community to get help and share your projects.
-
-## Deploy to the Mastra platform
-
-The [Mastra platform](https://projects.mastra.ai) provides two products for deploying and managing AI applications built with the Mastra framework. Learn more in the [Mastra platform documentation](https://mastra.ai/docs/mastra-platform/overview).
+```shell
+npx tsx test/clone_repo.ts https://github.com/octocat/Hello-World
+npx tsx test/listRepos.ts
+npx tsx test/clean_repo.ts Hello-World
+```
