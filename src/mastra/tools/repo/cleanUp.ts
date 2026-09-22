@@ -2,8 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { rm } from "fs/promises";
 import z from "zod";
 import path from "node:path";
-
-const ARC_MAP_WORKSPACE = path.join(process.cwd(), ".workspace");
+import { ARC_MAP_WORKSPACE } from "../../lib/constants";
 
 export const cleanUpRepo = createTool({
   id: "cleanup-repo",
@@ -14,12 +13,19 @@ export const cleanUpRepo = createTool({
   }),
 
   outputSchema: z.object({
-    success: z.boolean(),0
+    success: z.boolean(),
     repoName: z.string()
   }),
 
   execute: async ({ repoName }) => {
-    const repoPath = path.join(ARC_MAP_WORKSPACE, repoName);
+    const repoPath = path.resolve(path.join(ARC_MAP_WORKSPACE, repoName));
+    const workspaceResolved = path.resolve(ARC_MAP_WORKSPACE);
+    if (
+      repoPath !== workspaceResolved &&
+      !repoPath.startsWith(workspaceResolved + path.sep)
+    ) {
+      throw new Error(`Invalid repoName: path escapes workspace`);
+    }
 
     await rm(repoPath, {
       recursive: true,
