@@ -4,7 +4,7 @@ import { TaskSignalProvider } from '@mastra/core/signals';
 import { askUserTool, webFetchTool, webSearchTool } from '@mastra/core/tools';
 import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
 import { Memory } from '@mastra/memory';
-import { startScheduleTool, stopScheduleTool } from '../tools/schedule-tools';
+import { startScheduleTool, stopScheduleTool } from '../tools/scheduleTools';
 
 const workspacePath = 'workspace';
 
