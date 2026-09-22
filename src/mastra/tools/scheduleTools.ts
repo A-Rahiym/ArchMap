@@ -16,7 +16,7 @@ export const startScheduleTool = createTool({
     return mastra!.schedules.create({
       agentId: 'agent',
       cron: schedule,
-      prompt,
+  prompt,
       threadId: agent.threadId,
       resourceId: agent.resourceId,
     });

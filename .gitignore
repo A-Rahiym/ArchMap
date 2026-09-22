@@ -13,3 +13,4 @@ src/mastra/public/
 *.duckdb
 *.duckdb.wal
 test/
+.workspace/
