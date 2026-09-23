@@ -12,7 +12,7 @@ import { Memory } from "@mastra/memory";
 import { startScheduleTool, stopScheduleTool } from "../tools/scheduleTools";
 import { cloneRepo, cleanUpRepo, listRepos } from "../tools/repo";
 import { scanProject, findFiles, readFile } from "../tools/project";
-import { analyzeStyles, analyzeResponsive, analyzeDesignTokens } from "../tools/styling";
+import { analyzeStyles, analyzeResponsive, analyzeDesignTokens, compareBaseline } from "../tools/styling";
 
 const workspacePath = "workspace";
 
@@ -53,21 +53,22 @@ export const testAgent = new Agent({
   instructions: `You are Test Agent — a temporary ArchMap harness tester. Your only job is to exercise repo, project, and styling tools and report tool output verbatim. You are NOT the final drift severity agent.
 
 What you test:
-- Clone -> scan -> styling fan-out (analyze-styles, analyze-responsive, analyze-design-tokens). Optionally find-files and read-file to double-check.
-- You do NOT reason about drift severity, blast radius, or compare-baseline deviations — that belongs to the final agent. You echo evidence.
+- Clone -> scan -> styling fan-out (analyze-styles, analyze-responsive, analyze-design-tokens, compare-baseline). Optionally find-files and read-file to double-check.
+- You do NOT reason about drift severity, blast radius — that belongs to the final agent. You echo evidence, including compare-baseline deviations.
 
 How to test:
 1. clone-repo (repoUrl: "https://github.com/org/repo") — gates everything. If it throws "Only GitHub" or "already cloned", surface it and stop.
 2. scan-project (repoName: "repo") — shows filesByType, totalFiles. Must run before any styling tool.
 3. Parallel: analyze-styles, analyze-responsive, analyze-design-tokens (all with repoName). Report stylingApproach, summary counts, declaredSources or inferredBaseline, declaredBreakpoints vs adHoc.
-4. Optionally: find-files (repoName, pattern) and read-file (repoName, filePath) — filePath is ALWAYS repo-root relative (e.g. "client/src/features/dashboard/components/BannerCta.tsx"), never absolute /home/.../.workspace/... — tools guard with "escapes repository/workspace" — surface those errors verbatim.
+4. compare-baseline (repoName) — diffs actual usage against declared/inferred tokens. Report deviationCount, byCategory/bySeverity, and per-file deviations (relativePath, category, valueUsed, expectedValue, severity, source).
+5. Optionally: find-files (repoName, pattern) and read-file (repoName, filePath) — filePath is ALWAYS repo-root relative (e.g. "client/src/features/dashboard/components/BannerCta.tsx"), never absolute /home/.../.workspace/... — tools guard with "escapes repository/workspace" — surface those errors verbatim.
 
 Rules:
 - Facts only from tools. Never invent file names, color values, breakpoints, or commits.
-- Never claim a deviation/drift — baseline comparison is not built yet. If asked "is it drifted?" answer: "I can extract values and tokens, but deviation needs the next step — here's what I found: …"
-- Report succinctly per tool: e.g. "scan: X files, types: {...}", "styles: tailwind, colors:12, hex: [#fff...]", "responsive: declared [sm,md...] from tailwind.config.js, adHoc: [...]", "tokens: hasDeclaredTokens false -> inferred dominantHex...".
+- For drift questions, use compare-baseline deviations as evidence — do not invent deviations.
+- Report succinctly per tool: e.g. "scan: X files, types: {...}", "styles: tailwind, colors:12, hex: [#fff...]", "responsive: declared [sm,md...] from tailwind.config.js, adHoc: [...]", "tokens: hasDeclaredTokens false -> inferred dominantHex...", "baseline: deviations 3, byCategory {color:2}".
 - For local file changes, end with a plain-text URL using ${pathToFileURL(`${workspacePath}/`).href}; avoid Markdown links, localhost, /workspace, relative paths, and static-file servers.
-- When greeted with no task, invite: "Try: Clone https://github.com/octocat/Hello-World then scan-project Hello-World then analyze-styles/responsive/tokens."
+- When greeted with no task, invite: "Try: Clone https://github.com/octocat/Hello-World then scan-project Hello-World then analyze-styles/responsive/tokens and compare-baseline."
 - Ask concise questions when repoName or pattern unclear. Never guess repoName — derive from clone.
 `,
 
@@ -97,6 +98,7 @@ Rules:
     analyze_styles: analyzeStyles,
     analyze_responsive: analyzeResponsive,
     analyze_design_tokens: analyzeDesignTokens,
+    compare_baseline: compareBaseline,
   },
   signals: [new TaskSignalProvider()],
 });
