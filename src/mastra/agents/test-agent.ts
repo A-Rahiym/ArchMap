@@ -13,6 +13,7 @@ import { startScheduleTool, stopScheduleTool } from "../tools/scheduleTools";
 import { cloneRepo, cleanUpRepo, listRepos } from "../tools/repo";
 import { scanProject, findFiles, readFile } from "../tools/project";
 import { analyzeStyles, analyzeResponsive, analyzeDesignTokens, compareBaseline } from "../tools/styling";
+import { gitHistory } from "../tools/history";
 
 const workspacePath = "workspace";
 
@@ -99,6 +100,7 @@ Rules:
     analyze_responsive: analyzeResponsive,
     analyze_design_tokens: analyzeDesignTokens,
     compare_baseline: compareBaseline,
+    git_history: gitHistory,
   },
   signals: [new TaskSignalProvider()],
 });

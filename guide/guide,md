@@ -109,7 +109,9 @@ src/
 **`dependencies/`** — unchanged: internal vs. external package classification, useful context (e.g. "this repo has both Tailwind and styled-components installed" is itself a drift signal).
 
 **`history/`**
-- `git-history.ts`: now doing real work for the core product — who/when introduced each specific deviation, so drift reports can say "introduced in commit `abc123` by this PR," not just "this file is inconsistent."
+- `git-history.ts`: searches bounded Git history for each deviation value using cached `git log -S` evidence. It does not claim that a file's latest modification introduced a deviation and does not run `git blame` once per deviation.
+- Attribution output distinguishes evidence quality: `confirmed` means the searched value was found on an added line in the candidate commit, `approximate` means `-S` found a candidate but the added line could not be confirmed, and `unavailable` means no usable history evidence was found. A confirmed result includes a 1-based `line` when available.
+- `historyLimit` controls the maximum number of commits returned and searched, defaulting to `100`. Repeated deviations with the same `relativePath` and `valueUsed` share one cached search.
 
 ---
 
@@ -171,7 +173,7 @@ src/
 3. **Fan-out (parallel):** `analyze-styles`, `analyze-responsive`, `analyze-design-tokens`, `analyze-dependencies`, `analyze-imports`, `analyze-components` all run off the scan — none depend on each other.
 4. **`compare-baseline`** runs once the three styling-extraction tools finish — produces the raw deviation list.
 5. **`analyze-routes` / `analyze-data-flow`** run once imports + components are ready — this is what lets the agent later say *how much* a given deviation matters (blast radius).
-6. **`git-history`** runs in parallel with step 3 (only needs the clone) and is joined with the deviation list at the end — mapping each deviation to the commit/PR that introduced it.
+6. **`git-history`** runs in parallel with step 3 (only needs the clone) and is joined with the deviation list at the end — mapping each deviation to available Git evidence, with method and confidence rather than an unsupported introduction claim.
 7. **`architecture-agent`** receives: the deviation list, the architecture graph (for blast-radius context), and git attribution. It reasons about severity — not "is this a deviation" (the tools already proved that), but "does this deviation matter, and how much." It can call `read-file` for anything it needs to double-check before finalizing.
 8. **`cleanup-repo`** — last, or skipped if caching the workspace for a follow-up run (e.g. the next PR on the same repo).
 
