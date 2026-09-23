@@ -58,6 +58,11 @@ type TokensResult = {
   warnings: string[];
 };
 
+/** Checks whether a Tailwind value uses arbitrary syntax such as `p-[13px]`. */
+function isArbitraryValue(value: string): boolean {
+  return value.includes("[") && value.includes("]");
+}
+
 /** Executes a child Mastra tool with the current input and a minimal context object. */
 async function executeAnalyzer<T>(execute: unknown, repoName: string): Promise<T> {
   if (typeof execute !== "function") {
@@ -236,7 +241,7 @@ export const compareBaseline = createTool({
 
       // Colors: tailwind color classes
       for (const cls of file.colors) {
-        const isArbitrary = cls.includes("[");
+        const isArbitrary = isArbitraryValue(cls);
         // Named Tailwind classes cannot be mapped reliably to declared hex values
         // without resolving the project's Tailwind theme. Only arbitrary values
         // are actionable until that mapping exists.
@@ -262,9 +267,7 @@ export const compareBaseline = createTool({
 
       // Spacing
       for (const sp of file.spacing) {
-        // Check if spacing token declared or inferred
-        // For tailwind classes, base value is after dash
-        const isArbitrary = sp.includes("[");
+        const isArbitrary = isArbitraryValue(sp);
         const freq = spacingFreq.get(sp) || 1;
 
         let isExpected = false;
@@ -308,7 +311,7 @@ export const compareBaseline = createTool({
 
       // Typography, radius, shadow - similar, flag arbitrary or declared-missing
       for (const t of file.typography) {
-        const isArbitrary = t.includes("[");
+        const isArbitrary = isArbitraryValue(t);
         if (!isDeclaredCategory("typography") && !isArbitrary) continue;
         if (isDeclaredCategory("typography")) {
           let ok = false;
@@ -328,7 +331,7 @@ export const compareBaseline = createTool({
       }
 
       for (const r of file.radius) {
-        const isArbitrary = r.includes("[");
+        const isArbitrary = isArbitraryValue(r);
         if (!isDeclaredCategory("radius") && !isArbitrary) continue;
         if (isDeclaredCategory("radius")) {
           let ok = false;
@@ -348,7 +351,7 @@ export const compareBaseline = createTool({
       }
 
       for (const s of file.shadow) {
-        const isArbitrary = s.includes("[");
+        const isArbitrary = isArbitraryValue(s);
         // shadow rarely has declared tokens; flag arbitrary only for inferred
         if (!isArbitrary) continue;
         deviations.push({
