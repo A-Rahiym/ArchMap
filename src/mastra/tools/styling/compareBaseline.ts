@@ -6,6 +6,7 @@ import { analyzeStyles } from "./analyzeStyles";
 import { analyzeResponsive } from "./analyzeResponsive";
 import { analyzeDesignTokens } from "./analyzeDesignTokens";
 import { stat } from "node:fs/promises";
+import { isArbitraryValue } from "../../lib/deviations";
 
 type Deviation = {
   relativePath: string;
@@ -57,11 +58,6 @@ type TokensResult = {
   } | null;
   warnings: string[];
 };
-
-/** Checks whether a Tailwind value uses arbitrary syntax such as `p-[13px]`. */
-function isArbitraryValue(value: string): boolean {
-  return value.includes("[") && value.includes("]");
-}
 
 /** Executes a child Mastra tool with the current input and a minimal context object. */
 async function executeAnalyzer<T>(execute: unknown, repoName: string): Promise<T> {
