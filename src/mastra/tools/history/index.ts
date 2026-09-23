@@ -1,0 +1,1 @@
+export { gitHistory } from "./gitHistory";
