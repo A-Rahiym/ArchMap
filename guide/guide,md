@@ -1,0 +1,316 @@
+      # ArchMap — Build Guide (Reframed)
+
+**Design-System & Architecture Drift Detector for Frontend Repositories**
+
+> ArchMap watches a React/Next.js TypeScript codebase and tells you where it's drifting from its own established patterns — styling that's fallen out of sync with the design system, and architectural shortcuts that break the intended data flow — with evidence tied to specific files and commits, not vague impressions.
+
+This is the reframed version of the project. The original framing was "map the architecture of any repo" with styling as an extension bolted on at the end. That's the crowded lane — import-graph tools already exist (madge, dependency-cruiser, CodeSee, Sourcegraph). **The reframe puts deviation detection at the center**, and architecture mapping becomes the supporting evidence layer that makes deviation detection trustworthy, rather than the other way around.
+
+---
+
+## 1. The One-Line Idea
+
+> **ArchMap establishes what "normal" looks like in a codebase — architecturally and stylistically — then flags where reality has drifted from it, with evidence.**
+
+Not: "here's a graph of your repo" (a one-time novelty).
+Instead: "here's what's inconsistent right now, why it matters, and when it was introduced" (an ongoing utility, the kind of thing that earns a permanent spot in a team's PR checks).
+
+---
+
+## 2. Why This Reframe Fixes the "Reinventing the Wheel" Problem
+
+| Concern | Existing tools | ArchMap's actual gap to fill |
+|---|---|---|
+| Import/dependency graphing | madge, dependency-cruiser, Sourcegraph, CodeSee | Commodity. Don't lead with this. |
+| Visual regression (pixel diffs) | Chromatic, Percy | Detects *pixels changed*, not *why* — no reasoning about design-system conformance |
+| Token management | style-dictionary | Manages tokens you already declared; doesn't detect where code silently ignores them |
+| "Explain my repo" LLM tools | various GPT-wrapper repo explainers | No persistent baseline, no evidence discipline, prone to hallucination |
+| **Continuous drift detection tied to git evidence** | **Nobody doing this well for frontend styling + architecture together** | **This is ArchMap's wedge** |
+
+The senior-dev objection ("feels like reinventing the wheel") applies squarely to plain architecture mapping. It does **not** apply to "continuously catch when a PR introduces styling/architecture inconsistency, and explain why it matters" — that's a CI-native product, not a one-off visualizer, and it's a much smaller, less-served niche.
+
+---
+
+## 3. Core Philosophy (Unchanged, Still the Foundation)
+
+```
+Code → Evidence → Relationships → Reasoning → Drift / Deviation
+```
+
+Two responsibilities, kept strictly separate:
+
+| Layer | Responsibility | Examples |
+|---|---|---|
+| **Deterministic analysis** | Mechanically gathered facts | files, imports, style values in use, git history |
+| **AI reasoning** | Interpreting evidence | "this drift matters because it's in a user-facing billing component," "this bypass of the service layer is risky because 4 other pages depend on that context" |
+
+The agent never invents facts a tool can inspect directly — it only reasons over evidence tools hand it, and it never claims a deviation exists without a tool-verified baseline comparison behind it.
+
+---
+
+## 4. Tool Structure
+
+Grouped by concern. Note the reordering in priority (not folder location) — `styling/` and its baseline comparison are now the primary deliverable, and `architecture/` exists largely to **support and contextualize** that deliverable (e.g. "this styling drift is in a component 12 other pages depend on, so it's high-impact").
+
+```
+src/
+└── mastra/
+    ├── agents/
+    │   └── architecture-agent.ts
+    │
+    ├── workflows/
+    │   └── architecture-workflow.ts
+    │
+    └── tools/
+        │
+        ├── repo/
+        │   ├── clone-repo.ts
+        │   └── cleanup-repo.ts
+        │
+        ├── project/
+        │   ├── scan-project.ts
+        │   ├── read-file.ts
+        │   └── find-files.ts
+        │
+        ├── styling/                     ← the primary deliverable
+        │   ├── analyze-styles.ts
+        │   ├── analyze-responsive.ts
+        │   ├── analyze-design-tokens.ts
+        │   └── compare-baseline.ts      ← the actual deviation checker
+        │
+        ├── architecture/                ← supporting evidence for "why drift matters"
+        │   ├── analyze-imports.ts
+        │   ├── analyze-components.ts
+        │   ├── analyze-routes.ts
+        │   └── analyze-data-flow.ts
+        │
+        ├── dependencies/
+        │   └── analyze-dependencies.ts
+        │
+        └── history/
+            └── git-history.ts            ← who/when introduced the drift
+```
+
+### What each group does, in the reframed product
+
+**`repo/`** — clone/cleanup the workspace, unchanged from before.
+
+**`project/`** — structural discovery: classify files, allow controlled file reads and targeted search. This is the map the other tools walk.
+
+**`styling/` — the core product**
+- `analyze-styles.ts`: detect the styling approach (Tailwind, CSS Modules, styled-components) and extract *actual values in use* per component — spacing, color, font-size, radius, shadows.
+- `analyze-responsive.ts`: extract breakpoint usage per component; flag ad-hoc breakpoints that don't match the declared set.
+- `analyze-design-tokens.ts`: extract the declared token source if one exists (Tailwind config, `tokens.json`, theme file). If none exists, this tool's job becomes computing the *inferred* baseline — the dominant/most common values across the codebase.
+- `compare-baseline.ts`: the actual deviation engine. Diffs real usage (from the three tools above) against the baseline (declared or inferred). Outputs: file, value used, expected value/range, deviation frequency, and severity.
+
+**`architecture/` — context, not the headline**
+- `analyze-imports.ts`, `analyze-components.ts`, `analyze-routes.ts`, `analyze-data-flow.ts`: still built, but their job now is answering "how far does this deviation's blast radius reach?" — e.g. a hardcoded color in a component used by one page is low priority; the same drift in a component 15 pages depend on is high priority.
+
+**`dependencies/`** — unchanged: internal vs. external package classification, useful context (e.g. "this repo has both Tailwind and styled-components installed" is itself a drift signal).
+
+**`history/`**
+- `git-history.ts`: now doing real work for the core product — who/when introduced each specific deviation, so drift reports can say "introduced in commit `abc123` by this PR," not just "this file is inconsistent."
+
+---
+
+## 5. The Pipeline
+
+```
+                    USER
+                      │
+                      ▼
+               Repository URL
+                      │
+                      ▼
+                clone-repo
+                      │
+                      ▼
+                scan-project
+                      │
+        ┌─────────────┼──────────────┐
+        ▼             ▼              ▼
+  analyze-styles  analyze-       analyze-
+  /responsive/    dependencies   imports/components
+  design-tokens                        │
+        │                              ▼
+        │                    analyze-routes/data-flow
+        │                              │
+        ▼                              │
+  compare-baseline                     │
+  (deviation report)                   │
+        │                              │
+        └──────────────┬───────────────┘
+                        ▼
+                   git-history
+             (who/when introduced it)
+                        │
+                        ▼
+              architecture-agent
+       (severity + blast-radius reasoning)
+                        │
+                        ▼
+              Drift / Deviation Report
+              + supporting architecture context
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+     PR comment     Dashboard    Change history
+                                  (drift over time)
+                        │
+                  cleanup-repo
+```
+
+---
+
+## 6. How the Workflow Runs
+
+`architecture-workflow.ts` orchestrates the hard sequencing; the agent only reasons over what the workflow hands it.
+
+1. **`clone-repo`** — gates everything. Stop on failure.
+2. **`scan-project`** — produces the file classification everything else needs.
+3. **Fan-out (parallel):** `analyze-styles`, `analyze-responsive`, `analyze-design-tokens`, `analyze-dependencies`, `analyze-imports`, `analyze-components` all run off the scan — none depend on each other.
+4. **`compare-baseline`** runs once the three styling-extraction tools finish — produces the raw deviation list.
+5. **`analyze-routes` / `analyze-data-flow`** run once imports + components are ready — this is what lets the agent later say *how much* a given deviation matters (blast radius).
+6. **`git-history`** runs in parallel with step 3 (only needs the clone) and is joined with the deviation list at the end — mapping each deviation to the commit/PR that introduced it.
+7. **`architecture-agent`** receives: the deviation list, the architecture graph (for blast-radius context), and git attribution. It reasons about severity — not "is this a deviation" (the tools already proved that), but "does this deviation matter, and how much." It can call `read-file` for anything it needs to double-check before finalizing.
+8. **`cleanup-repo`** — last, or skipped if caching the workspace for a follow-up run (e.g. the next PR on the same repo).
+
+**Why a workflow and not free agent tool-calling:** deterministic ordering, parallelism where safe, per-step retries, and — critically for a CI-native product — reproducibility. The same repo state should always produce the same deviation report; the agent's role is scoped to severity judgment, never to fact-finding it could get wrong.
+
+---
+
+## 7. Build Phases (Reordered Around the Reframe)
+
+Deviation detection now ships early — by Phase 5 you have a usable MVP, not Phase 9.
+
+### Phase 0 — Scaffolding
+Mastra project, TS config, Zod schemas, folder structure. **Exit:** builds and runs.
+
+### Phase 1 — `repo/`
+`clone-repo.ts`, `cleanup-repo.ts`. Fix the current Zod `outputSchema` issue here (`z.object({...})`, not a plain object). **Exit:** clone a real repo reliably into `/tmp/archmap/<repo-name>`.
+
+### Phase 2 — `project/`
+`scan-project.ts`, `find-files.ts`, `read-file.ts`. **Exit:** correct file classification on a real repo; agent can request individual files.
+
+### Phase 3 — `styling/` extraction
+`analyze-styles.ts`, `analyze-responsive.ts`, `analyze-design-tokens.ts`. **Exit:** accurate extraction of real spacing/color/typography/breakpoint values in use, and a correctly identified (or correctly inferred) baseline.
+
+### Phase 4 — `compare-baseline.ts`
+The deviation engine itself. **Exit:** on a repo with intentionally-introduced inconsistencies, correctly flags the outliers and leaves consistent code alone. Watch false-positive rate closely — trust is the entire value proposition here.
+
+### Phase 5 — `history/` + attribution
+`git-history.ts`, joined against the deviation list. **Exit:** every flagged deviation is correctly attributed to the commit that introduced it. **This is your first real MVP milestone** — a working "here's what's drifted, and when it happened" tool.
+
+### Phase 6 — `architecture/` (blast-radius context)
+`analyze-imports.ts`, `analyze-components.ts`, `analyze-routes.ts`, `analyze-data-flow.ts`, plus `dependencies/analyze-dependencies.ts`. **Exit:** for a known deviation, ArchMap can correctly state how many components/pages depend on the affected file.
+
+### Phase 7 — `architecture-agent`
+Wire everything together; agent reasons about severity (blast radius × frequency × user-facing-ness) rather than just listing raw deviations. **Exit:** agent output prioritizes deviations sensibly — a drift in a shared, high-traffic component ranks above a one-off in an unused test page.
+
+### Phase 8 — `architecture-workflow.ts`
+Formalize the sequencing in Section 6 as an explicit, repeatable Mastra workflow. **Exit:** one call, given a repo URL, deterministically produces the same deviation report from the same repo state.
+
+### Phase 9 — Output Layer
+Turn the deviation report into something readable: a report, a simple dashboard, or (see Phase 10) a PR comment. **Exit:** someone unfamiliar with the repo can understand what's drifted and why it matters.
+
+### Phase 10 — CI / PR Integration (the real product shape)
+Scope the workflow to a PR diff instead of a full repo (using cached workspace + git diff), and post an automated PR comment/check summarizing new deviations with file/line/blame evidence. **Exit:** opening a PR against a connected repo produces an accurate automated comment — this is the point where ArchMap stops being a manual tool and becomes infrastructure a team keeps.
+
+### Phase 11 — Change Tracking Over Time
+Persist deviation reports as versioned snapshots keyed by commit SHA; diff snapshots to show drift trending up or down over time, team- or component-wide. **Exit:** "this component's drift score has doubled over the last month" style reporting.
+
+### Phase 12 — Full Architecture Explanation (Optional, Lower Priority Now)
+The original "explain this repo's architecture" output — graph + prose explanation of the whole system. Still valuable, but now explicitly secondary: build it once the deviation-detection core is solid, using the architecture tools already built in Phase 6.
+
+---
+
+## 8. Build Order Checklist
+
+- [ ] Phase 0 — Scaffolding
+- [ ] Phase 1 — `repo/` clone + cleanup
+- [ ] Phase 2 — `project/` scan, find, read
+- [ ] Phase 3 — `styling/` extraction
+- [ ] Phase 4 — `compare-baseline` (deviation engine)
+- [ ] Phase 5 — `history/` + attribution — **first MVP milestone**
+- [ ] Phase 6 — `architecture/` blast-radius context
+- [ ] Phase 7 — `architecture-agent` (severity reasoning)
+- [ ] Phase 8 — `architecture-workflow`
+- [ ] Phase 9 — Output layer
+- [ ] Phase 10 — CI / PR integration — **real product shape**
+- [ ] Phase 11 — Change tracking over time
+- [ ] Phase 12 — Full architecture explanation (optional, lower priority)
+
+---
+
+## 9. What ArchMap Is Not
+
+- Not a code generator, not an IDE
+- Not primarily an architecture visualizer (that's the supporting layer now, not the headline)
+- Not a pixel-diff visual regression tool (Chromatic/Percy already own that)
+- Not a token manager (style-dictionary owns that) — ArchMap consumes tokens, it doesn't manage them
+- Not a one-time "explain my repo" novelty — it's meant to run continuously and get more useful the longer it watches a repo
+
+---
+
+## 10. Guiding Rule When Building Any Tool
+
+Before writing any tool, ask:
+
+1. **Is this fact discoverable mechanically?** → Deterministic tool. Never let the agent guess at something a tool could verify.
+2. **Does this require judging whether a fact matters?** → Belongs in `architecture-agent`, operating strictly on top of verified tool output — severity and blast-radius reasoning, never fact invention.
+3. **Does this serve the core "where has this drifted, and why does it matter" question?** → Prioritize it. Anything that only serves "here's a pretty graph" is secondary until the drift-detection core is solid and trusted.
+
+### 10.1 Tool Construction Pattern
+
+How every tool in `src/mastra/tools/**` must be built — established from `analyzeDesignTokens` and enforced henceforth.
+
+**File shape — helpers first, orchestration last:**
+
+```
+src/mastra/tools/<group>/<tool>.ts
+  1. Imports: `createTool`, `zod`, `node:fs/promises`, `node:path`, `ARC_MAP_WORKSPACE` from `lib/constants`, path helpers from `lib/workspace`
+  2. Module constants: `IGNORED_DIRS`, `DEFAULT_BREAKPOINT_VALUES`, `MAX_FILES` — values only, imported from `lib/constants` when shared
+  3. Pure helpers — each with `/** JSDoc */`, no I/O, no tool calls, unit-testable:
+     - Narrow/validate: `isRecord(value)`, `isStylesheetTokenCandidate(fileName)`
+     - Collect/parse: `collectLeafValues()`, `extractCssTokens(content)`, `extractDeclaredScreens(content)`
+     - Classify/decide: `isResponsiveVariant(variant, declared)`, `categorizeTailwindClass(cls)`
+  4. Export: `export const <tool> = createTool({ id:"kebab-case", description:"...", inputSchema: z.object({repoName}), outputSchema: z.object({...}), execute: async ({repoName}) => { ... }})`
+```
+
+**Inside `execute` — phase comments, deterministic, path-safe:**
+
+```ts
+execute: async ({ repoName }) => {
+  // Validate the repository before searching for declared token sources.
+  const repoPath = resolveRepoPath(repoName); // lib/workspace — never path.join inline
+  // Find likely token and theme files within the bounded search depth.
+  queue... // BFS with IGNORED_DIRS, depth limit, warnings[]
+  // Extract declared values from each candidate source.
+  for (...) { helpers... }
+  // A source file counts as declared only when it yielded usable token values.
+  const hasDeclaredTokens = ...
+  // Infer a baseline from dominant usage when no declared values are available.
+  if (!hasDeclaredTokens) { ... }
+  return { repoName, localPath, workspace, ... summary, warnings }
+}
+```
+
+Comments are phase markers (`Validate before searching`, `bounded search depth`) — not line-by-line how.
+
+**Path helpers — never inline:** Always `resolveRepoPath(repoName)` and `assertInsideRepo(repoPath, filePath)` from `lib/workspace`. `lib/constants` is values-only (`ARC_MAP_WORKSPACE`, `MAX_SCAN_FILES`, `DEFAULT_BREAKPOINT_VALUES`). `lib/workspace` is functions-only. Keep `lib/` minimal — helpers stay in the tool file unless reused by ≥2 tools, then promote to `lib/`.
+
+**Registration — agent-only:** Import via barrel (`from "../tools/styling"` using `styling/index.ts`) and register on `test-agent.ts` `tools:{}` only. `src/mastra/index.ts` stays `tools:{schedules}` — no global tool registration.
+
+**Reuse example — canonical shape (`analyzeDesignTokens`):**
+
+```ts
+/** Narrows an unknown value to a non-array object for token traversal. */
+function isRecord(value: unknown): value is Record<string, unknown> { ... }
+
+/** Extracts and classifies CSS custom properties from a stylesheet. */
+function extractCssTokens(content: string): {colors, spacing, typography, radius, breakpoints} { ... }
+```
+
+See also `analyzeResponsive`: `extractDeclaredScreens()` + `isResponsiveVariant()`.
+
+**Commit style:** One commit per tool/helper group, head-only (`feat(styling): extract CSS custom properties...`), no body.
