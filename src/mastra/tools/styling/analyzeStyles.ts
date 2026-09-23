@@ -9,6 +9,7 @@ const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", ".next", "build", 
 
 type StylingApproach = "tailwind" | "css-modules" | "styled-components" | "mixed" | "unknown";
 
+/** Detects the styling systems represented in the scanned file list and contents. */
 function detectApproach(fileContents: Map<string, string>, fileList: string[]): StylingApproach {
   let hasTailwind = false;
   let hasCssModules = false;
@@ -34,6 +35,7 @@ function detectApproach(fileContents: Map<string, string>, fileList: string[]): 
   return "unknown";
 }
 
+/** Extracts literal class and className attribute values for utility classification. */
 function extractTailwindClasses(content: string): string[] {
   const classRegex = /className\s*=\s*["'`]([^"'`]+)["'`]/g;
   const classes: string[] = [];
@@ -51,19 +53,20 @@ function extractTailwindClasses(content: string): string[] {
   return classes;
 }
 
+/** Categorizes one utility class while preserving its original responsive variant. */
 function categorizeTailwindClass(cls: string): { category: string; value: string } | null {
   // strip responsive prefix e.g. md:bg-red-500 -> bg-red-500
   const base = cls.includes(":") ? cls.split(":").pop()! : cls;
 
+  if (/^text-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl|\[.*\])$/.test(base) || /^font-/.test(base) || /^leading-/.test(base) || /^tracking-/.test(base)) return { category: "typography", value: cls };
   if (/^(bg|text|border|from|to|via)-/.test(base)) return { category: "color", value: cls };
   if (/^(p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|space-x|space-y)-/.test(base)) return { category: "spacing", value: cls };
-  if (/^text-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|\[.*\])/.test(base) || /^font-/.test(base) || /^leading-/.test(base) || /^tracking-/.test(base)) return { category: "typography", value: cls };
   if (/^rounded/.test(base)) return { category: "radius", value: cls };
   if (/^shadow/.test(base)) return { category: "shadow", value: cls };
   // arbitrary values like p-[13px] or bg-[#ff0000]
   if (/^\w+-\[.*\]$/.test(base)) {
     if (base.startsWith("bg-") || base.startsWith("text-") || base.startsWith("border-")) return { category: "color", value: cls };
-    if (base.startsWith("p-") || base.startsWith("m-") || base.startsWith("gap-")) return { category: "spacing", value: cls };
+    if (/^(p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|space-x|space-y)-/.test(base)) return { category: "spacing", value: cls };
     return { category: "other", value: cls };
   }
   return null;
@@ -104,6 +107,7 @@ export const analyzeStyles = createTool({
     warnings: z.array(z.string()),
   }),
   execute: async ({ repoName }) => {
+    // Validate the requested repository before scanning it.
     const repoPath = resolveRepoPath(repoName);
     try {
       const s = await stat(repoPath);
@@ -112,6 +116,7 @@ export const analyzeStyles = createTool({
       throw new Error(`Repository "${repoName}" not found at ${repoPath}`);
     }
 
+    // Discover supported source and stylesheet files while skipping generated content.
     const files: string[] = [];
     const queue: string[] = [repoPath];
     const warnings: string[] = [];
@@ -146,6 +151,7 @@ export const analyzeStyles = createTool({
       }
     }
 
+    // Load readable text files within the per-file size limit.
     const fileContents = new Map<string, string>();
     for (const rel of files) {
       const full = path.join(repoPath, rel);
@@ -160,6 +166,7 @@ export const analyzeStyles = createTool({
       }
     }
 
+    // Extract categorized values and aggregate counts for the final report.
     const stylingApproach: StylingApproach = detectApproach(fileContents, files);
 
     const valuesByFile: Array<{

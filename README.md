@@ -27,6 +27,17 @@ See `guide/guide,md` for the full spec.
 
 Current progress: `repo/` complete, remaining groups in progress.
 
+## Styling tools
+
+The styling tools analyze a cloned repository identified by `repoName` and use the repository's local files under `.workspace`.
+
+- `analyze-styles` scans supported source and stylesheet files and reports actual color, spacing, typography, radius, shadow, and CSS value usage per file.
+- `analyze-responsive` finds Tailwind breakpoint prefixes and CSS media queries, then reports ad-hoc responsive values.
+- `analyze-design-tokens` discovers declared values from Tailwind configuration, token files, and theme files. When usable declared tokens are unavailable, it infers a baseline from dominant colors and spacing values.
+- `compare-baseline` runs the three analyzers in parallel and compares observed usage against the declared-first, inferred-second baseline. It returns file-level deviations with expected values, source, frequency, severity, and summary counts.
+
+The tools use bounded file scans and heuristic extraction rather than a full JavaScript, Tailwind, or CSS parser. Dynamic class expressions and unsupported configuration syntax may be missed, while arbitrary values are treated as stronger drift signals. Normal named Tailwind color classes are not compared directly to hex tokens unless the project's theme can be resolved.
+
 ## Get started
 
 Set your `GOOGLE_GENERATIVE_AI_API_KEY` in `.env` (see `.env.example`), then:
