@@ -7,6 +7,31 @@ import { resolveRepoPath } from "../../lib/workspace";
 
 const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", ".next", "build", ".turbo", ".mastra", "coverage"]);
 
+const DEFAULT_BREAKPOINT_VALUES = new Set(["640px", "768px", "1024px", "1280px", "1536px"]);
+const KNOWN_RESPONSIVE_PREFIXES = new Set(["xs", "sm", "md", "lg", "xl", "2xl", "3xl", "4xl"]);
+
+/** Extracts breakpoint names and values from a common Tailwind screens object. */
+function extractDeclaredScreens(content: string): { names: string[]; values: Set<string> } {
+  const names: string[] = [];
+  const values = new Set<string>();
+  const screensMatch = content.match(/screens\s*:\s*\{([^}]+)\}/s);
+  if (!screensMatch) {
+    return { names, values };
+  }
+
+  for (const match of screensMatch[1].matchAll(/['"]?([\w-]+)['"]?\s*:\s*['"]?([^,'"\s}]+)['"]?/g)) {
+    names.push(match[1]);
+    values.add(match[2]);
+  }
+
+  return { names, values };
+}
+
+/** Determines whether a class prefix represents a responsive breakpoint variant. */
+function isResponsiveVariant(variant: string, declaredBreakpoints: string[]): boolean {
+  return declaredBreakpoints.includes(variant) || KNOWN_RESPONSIVE_PREFIXES.has(variant);
+}
+
 export const analyzeResponsive = createTool({
   id: "analyze-responsive",
   description: "Extracts breakpoint usage per file and flags ad-hoc breakpoints not in the declared set.",
@@ -36,6 +61,7 @@ export const analyzeResponsive = createTool({
     warnings: z.array(z.string()),
   }),
   execute: async ({ repoName }) => {
+    // Validate the repository before reading breakpoint configuration or source files.
     const repoPath = resolveRepoPath(repoName);
     try {
       const s = await stat(repoPath);
@@ -44,9 +70,10 @@ export const analyzeResponsive = createTool({
       throw new Error(`Repository "${repoName}" not found at ${repoPath}`);
     }
 
-    // Step 1: try to find declared breakpoints from tailwind config
+    // Discover declared breakpoint names and numeric values from Tailwind configuration.
     let declaredBreakpoints: string[] = [];
     let declaredSource: string | null = null;
+    let declaredBreakpointValues = new Set<string>(DEFAULT_BREAKPOINT_VALUES);
     const configCandidates = [
       "tailwind.config.js",
       "tailwind.config.ts",
@@ -90,11 +117,10 @@ export const analyzeResponsive = createTool({
       try {
         const content = await fsReadFile(foundConfigs[0], "utf-8");
         // naive parse: look for screens: { ... } or theme.screens
-        const screensMatch = content.match(/screens\s*:\s*\{([^}]+)\}/s);
-        if (screensMatch) {
-          const inner = screensMatch[1];
-          const keys = [...inner.matchAll(/['"]?(\w+)['"]?\s*:/g)].map((m) => m[1]);
-          declaredBreakpoints = keys;
+        const screens = extractDeclaredScreens(content);
+        if (screens.names.length > 0) {
+          declaredBreakpoints = screens.names;
+          declaredBreakpointValues = screens.values;
         } else {
           // default tailwind breakpoints if config exists but no custom screens
           declaredBreakpoints = ["sm", "md", "lg", "xl", "2xl"];
@@ -110,7 +136,7 @@ export const analyzeResponsive = createTool({
       declaredBreakpoints = ["sm", "md", "lg", "xl", "2xl"];
     }
 
-    // Step 2: scan files for usage
+    // Scan source files for responsive utility prefixes and CSS media queries.
     const files: string[] = [];
     const queue: string[] = [repoPath];
     const warnings: string[] = [];
@@ -144,10 +170,7 @@ export const analyzeResponsive = createTool({
       }
     }
 
-    const tailwindPrefixRegex = /\b(sm|md|lg|xl|2xl|xs|3xl|4xl):[^\s"'`]+/g;
     const mediaQueryRegex = /@media\s*\(.*?(?:min-width|max-width)\s*:\s*([^)]+)\)/g;
-    // capture arbitrary breakpoint values like w-[137px] or min-w-[500px]
-    const arbitraryValueRegex = /\[(\d+px|\d+rem|\d+em)\]/g;
 
     const usageByFile: Array<{
       relativePath: string;
@@ -177,9 +200,11 @@ export const analyzeResponsive = createTool({
       const adHocValues: string[] = [];
 
       let m: RegExpExecArray | null;
-      const twRe = new RegExp(tailwindPrefixRegex);
+      const twRe = /\b([a-zA-Z][\w-]*):([^\s"'`]+)/g;
       while ((m = twRe.exec(content)) !== null) {
-        const prefix = m[0].split(":")[0];
+        const prefix = m[1];
+        const utility = m[2];
+        if (!isResponsiveVariant(prefix, declaredBreakpoints) || utility.startsWith("//")) continue;
         tailwindPrefixes.push(m[0]);
         allPrefixes.add(prefix);
         if (!declaredBreakpoints.includes(prefix)) {
@@ -193,21 +218,11 @@ export const analyzeResponsive = createTool({
         const val = m[0].trim();
         mediaQueries.push(val);
         allMedia.add(val);
-        // check if media value matches declared breakpoints numeric values? we only have keys, so treat any media query as ad-hoc if no config source
-        // For now, flag media queries with px values not matching typical breakpoints
         const pxMatch = m[1];
-        if (pxMatch && !["640px", "768px", "1024px", "1280px", "1536px"].some((v) => pxMatch.includes(v))) {
-          // also check if config had custom values — we don't have numeric mapping, so flag as ad-hoc
+        if (pxMatch && ![...declaredBreakpointValues].some((value) => pxMatch.includes(value))) {
           adHocValues.push(val);
           allAdHoc.add(val);
         }
-      }
-
-      // also catch arbitrary values
-      const arbRe = new RegExp(arbitraryValueRegex, "g");
-      while ((m = arbRe.exec(content)) !== null) {
-        adHocValues.push(m[0]);
-        allAdHoc.add(m[0]);
       }
 
       if (tailwindPrefixes.length || mediaQueries.length || adHocValues.length) {
