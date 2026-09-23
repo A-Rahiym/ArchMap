@@ -7,6 +7,100 @@ import { resolveRepoPath } from "../../lib/workspace";
 
 const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", ".next", "build", ".turbo", ".mastra", "coverage"]);
 
+/** Narrows an unknown value to a non-array object for token traversal. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Recursively collects primitive leaf values from a nested token group. */
+function collectLeafValues(value: unknown): string[] {
+  if (typeof value === "string" || typeof value === "number") {
+    return [String(value)];
+  }
+  if (!isRecord(value)) return [];
+  return Object.values(value).flatMap(collectLeafValues);
+}
+
+/** Recursively collects keys from nested token groups for named token categories. */
+function collectObjectKeys(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  return Object.entries(value).flatMap(([key, child]) => [
+    key,
+    ...collectObjectKeys(child),
+  ]);
+}
+
+/** Adds token categories found in a parsed JSON token document to the accumulators. */
+function addJsonTokens(
+  json: unknown,
+  declaredColors: string[],
+  declaredSpacing: string[],
+  declaredTypography: string[],
+  declaredRadius: string[],
+  declaredBreakpoints: string[]
+): void {
+  if (!isRecord(json)) return;
+
+  const colors = json.colors ?? json.color;
+  const spacing = json.spacing;
+  const typography = json.typography ?? json.fontSize ?? json.fonts;
+  const radius = json.radius ?? json.borderRadius;
+  const breakpoints = json.breakpoints ?? json.screens;
+
+  declaredColors.push(...collectLeafValues(colors));
+  declaredSpacing.push(...collectObjectKeys(spacing));
+  declaredTypography.push(...collectObjectKeys(typography));
+  declaredRadius.push(...collectObjectKeys(radius));
+  declaredBreakpoints.push(...collectObjectKeys(breakpoints));
+}
+
+/** Extracts and classifies CSS custom properties from a stylesheet. */
+function extractCssTokens(content: string): {
+  colors: string[];
+  spacing: string[];
+  typography: string[];
+  radius: string[];
+  breakpoints: string[];
+} {
+  const tokens = {
+    colors: [] as string[],
+    spacing: [] as string[],
+    typography: [] as string[],
+    radius: [] as string[],
+    breakpoints: [] as string[],
+  };
+  const customPropertyRegex = /(--[\w-]+)\s*:\s*([^;{}]+)(?:;|$)/g;
+  const colorValueRegex = /^(?:#(?:[\da-f]{3,8})\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i;
+
+  for (const match of content.matchAll(customPropertyRegex)) {
+    const name = match[1].toLowerCase();
+    const value = match[2].trim();
+
+    if (colorValueRegex.test(value)) {
+      tokens.colors.push(value.toLowerCase());
+    }
+    if (/(?:font|type|line-height|letter-spacing)/.test(name)) {
+      tokens.typography.push(name);
+    }
+    if (/(?:spacing|space|pad|margin|gap|width|height|size)/.test(name)) {
+      tokens.spacing.push(name);
+    }
+    if (/radius/.test(name)) {
+      tokens.radius.push(name);
+    }
+    if (/(?:breakpoint|screen|\bbp\b)/.test(name)) {
+      tokens.breakpoints.push(name);
+    }
+  }
+
+  return tokens;
+}
+
+function isStylesheetTokenCandidate(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return [".css", ".scss", ".sass", ".less"].some((extension) => lower.endsWith(extension));
+}
+
 export const analyzeDesignTokens = createTool({
   id: "analyze-design-tokens",
   description:
@@ -40,6 +134,7 @@ export const analyzeDesignTokens = createTool({
     warnings: z.array(z.string()),
   }),
   execute: async ({ repoName }) => {
+    // Validate the repository before searching for declared token sources.
     const repoPath = resolveRepoPath(repoName);
     try {
       const s = await stat(repoPath);
@@ -56,7 +151,7 @@ export const analyzeDesignTokens = createTool({
     const declaredRadius: string[] = [];
     const declaredBreakpoints: string[] = [];
 
-    // BFS to find token files
+    // Find likely token and theme files within the bounded search depth.
     const queue: string[] = [repoPath];
     const candidateFiles: Array<{ full: string; rel: string }> = [];
 
@@ -94,6 +189,7 @@ export const analyzeDesignTokens = createTool({
             lower.endsWith("theme.ts") ||
             lower.endsWith("theme.js") ||
             lower === "tokens.ts"
+            || isStylesheetTokenCandidate(lower)
           ) {
             candidateFiles.push({ full, rel });
           }
@@ -101,6 +197,7 @@ export const analyzeDesignTokens = createTool({
       }
     }
 
+    // Extract declared values from each candidate source.
     for (const { full, rel } of candidateFiles) {
       try {
         const content = await fsReadFile(full, "utf-8");
@@ -111,6 +208,28 @@ export const analyzeDesignTokens = createTool({
         if (lower.startsWith("tailwind.config")) type = "tailwind-config";
         else if (lower.includes("tokens")) type = "tokens";
         else if (lower.includes("theme")) type = "theme";
+
+        const stylesheetTokens = isStylesheetTokenCandidate(lower)
+          ? extractCssTokens(content)
+          : null;
+
+        if (stylesheetTokens) {
+          declaredColors.push(...stylesheetTokens.colors);
+          declaredSpacing.push(...stylesheetTokens.spacing);
+          declaredTypography.push(...stylesheetTokens.typography);
+          declaredRadius.push(...stylesheetTokens.radius);
+          declaredBreakpoints.push(...stylesheetTokens.breakpoints);
+          if (
+            stylesheetTokens.colors.length ||
+            stylesheetTokens.spacing.length ||
+            stylesheetTokens.typography.length ||
+            stylesheetTokens.radius.length ||
+            stylesheetTokens.breakpoints.length
+          ) {
+            declaredSources.push({ relativePath: rel, type: "css-custom-properties" });
+          }
+          continue;
+        }
 
         declaredSources.push({ relativePath: rel, type });
 
@@ -151,19 +270,20 @@ export const analyzeDesignTokens = createTool({
           declaredBreakpoints.push(...keys);
         }
 
-        // if tokens.json, try JSON parse for structured tokens
-        if (rel.endsWith(".json")) {
+        // If JSON, parse nested token groups structurally.
+        if (rel.toLowerCase().endsWith(".json")) {
           try {
             const json = JSON.parse(content);
-            if (json.colors || json.color) {
-              const c = json.colors || json.color;
-              if (typeof c === "object") declaredColors.push(...Object.values(c).map((v) => String(v)));
-            }
-            if (json.spacing) {
-              declaredSpacing.push(...Object.keys(json.spacing));
-            }
+            addJsonTokens(
+              json,
+              declaredColors,
+              declaredSpacing,
+              declaredTypography,
+              declaredRadius,
+              declaredBreakpoints
+            );
           } catch {
-            // ignore parse errors
+            warnings.push(`Could not parse token JSON: ${rel}`);
           }
         }
       } catch {
@@ -171,10 +291,17 @@ export const analyzeDesignTokens = createTool({
       }
     }
 
-    const hasDeclaredTokens = declaredSources.length > 0;
+    // A source file counts as declared only when it yielded usable token values.
+    const hasDeclaredTokens =
+      declaredColors.length > 0 ||
+      declaredSpacing.length > 0 ||
+      declaredTypography.length > 0 ||
+      declaredRadius.length > 0 ||
+      declaredBreakpoints.length > 0;
 
     let inferredBaseline: { dominantHexColors: string[]; dominantSpacing: string[]; note: string } | null = null;
 
+    // Infer a baseline from dominant usage when no declared values are available.
     if (!hasDeclaredTokens) {
       // compute inferred baseline by scanning repo for dominant values
       // reuse similar walk as analyzeStyles but just for hex and spacing classes
