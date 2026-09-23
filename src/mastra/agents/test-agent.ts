@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { Agent } from "@mastra/core/agent";
 import { TaskSignalProvider } from "@mastra/core/signals";
-import { askUserTool, webFetchTool, webSearchTool } from "@mastra/core/tools";
+import { askUserTool } from "@mastra/core/tools";
 import {
   LocalFilesystem,
   LocalSandbox,
@@ -86,11 +86,8 @@ Rules:
   }),
   workspace,
   tools: {
-    ask_user: askUserTool,
     start_schedule: startScheduleTool,
     stop_schedule: stopScheduleTool,
-    web_fetch: webFetchTool,
-    web_search: webSearchTool,
     clone_repo: cloneRepo,
     cleanup_repo: cleanUpRepo,
     list_repos: listRepos,
