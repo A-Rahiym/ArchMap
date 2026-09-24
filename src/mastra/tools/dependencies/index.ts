@@ -1,0 +1,1 @@
+export { analyzeDependencies } from "./analyzeDependencies";
