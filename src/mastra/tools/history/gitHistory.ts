@@ -52,8 +52,8 @@ function parseGitLog(raw: string): HistoryEntry[] {
 /** Checks whether the repository has limited history from a shallow clone. */
 async function isShallowRepo(repoPath: string): Promise<boolean> {
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--is-shallow-repository"], { cwd: repoPath });
-    return stdout.trim() === "true";
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--is-shallow-repository'], { cwd: repoPath });
+    return stdout.trim() === 'true';
   } catch {
     return false;
   }
